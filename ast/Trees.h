@@ -30,7 +30,7 @@ namespace sorbet::ast {
 
 class Expression {
 public:
-    Expression(core::Loc loc);
+    Expression(core::LocOffsets loc);
     virtual ~Expression() = default;
     virtual std::string toStringWithTabs(const core::GlobalState &gs, int tabs = 0) const = 0;
     std::string toString(const core::GlobalState &gs) const {
@@ -40,7 +40,7 @@ public:
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0) = 0;
     std::unique_ptr<Expression> deepCopy() const;
     virtual void _sanityCheck() = 0;
-    const core::Loc loc;
+    const core::LocOffsets loc;
 
     class DeepCopyError {};
 
@@ -92,7 +92,7 @@ template <class To> bool isa_tree(Expression *what) {
 
 class Reference : public Expression {
 public:
-    Reference(core::Loc loc);
+    Reference(core::LocOffsets loc);
 };
 CheckSize(Reference, 16, 8);
 
