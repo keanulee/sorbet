@@ -683,7 +683,7 @@ private:
         } catch (SorbetException &e) {
             Exception::failInFuzzer();
 
-            throw ReportedRubyException{e, loc};
+            throw ReportedRubyException{e, core::Loc(ctx.file, loc)};
         }
     }
 };
@@ -1144,7 +1144,7 @@ private:
         } catch (SorbetException &e) {
             Exception::failInFuzzer();
 
-            throw ReportedRubyException{e, loc};
+            throw ReportedRubyException{e, core::Loc(ctx.file, loc)};
         }
     }
 };
