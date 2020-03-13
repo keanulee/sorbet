@@ -156,4 +156,10 @@ bool GlobalSubstitution::useFastPath() const {
     return fastPath;
 }
 
+ErrorBuilder MutableContext::beginError(LocOffsets loc, ErrorClass what) const {
+    return state.beginError(Loc(file, loc), what);
+}
+ErrorBuilder Context::beginError(LocOffsets loc, ErrorClass what) const {
+    return state.beginError(Loc(file, loc), what);
+}
 } // namespace sorbet::core

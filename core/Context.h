@@ -25,6 +25,7 @@ public:
     Context(const Context &other) noexcept : state(other.state), owner(other.owner), file(other.file) {}
     Context(const MutableContext &other) noexcept;
 
+    ErrorBuilder beginError(LocOffsets loc, ErrorClass what) const;
     static bool permitOverloadDefinitions(const core::GlobalState &gs, FileRef sigLoc, core::SymbolRef owner);
 
     Context withOwner(SymbolRef sym) const;
@@ -61,6 +62,7 @@ public:
 
     MutableContext withOwner(SymbolRef sym) const;
     MutableContext withFile(FileRef file) const;
+    ErrorBuilder beginError(LocOffsets loc, ErrorClass what) const;
 
     void trace(std::string_view msg) const;
 };

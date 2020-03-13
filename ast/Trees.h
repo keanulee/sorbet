@@ -159,7 +159,7 @@ public:
 
     Flags flags;
 
-    MethodDef(core::Loc loc, core::Loc declLoc, core::SymbolRef symbol, core::NameRef name, ARGS_store args,
+    MethodDef(core::LocOffsets loc, core::Loc declLoc, core::SymbolRef symbol, core::NameRef name, ARGS_store args,
               std::unique_ptr<Expression> rhs, Flags flags);
     virtual std::string toStringWithTabs(const core::GlobalState &gs, int tabs = 0) const;
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0);
@@ -335,7 +335,7 @@ public:
     core::NameRef name;
     Kind kind;
 
-    UnresolvedIdent(core::Loc loc, Kind kind, core::NameRef name);
+    UnresolvedIdent(core::LocOffsets loc, Kind kind, core::NameRef name);
     virtual std::string toStringWithTabs(const core::GlobalState &gs, int tabs = 0) const;
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0);
     virtual std::string nodeName();
@@ -630,7 +630,7 @@ public:
     // The distinguished final expression (determines return value)
     std::unique_ptr<Expression> expr;
 
-    InsSeq(core::Loc locOffsets, STATS_store stats, std::unique_ptr<Expression> expr);
+    InsSeq(core::LocOffsets locOffsets, STATS_store stats, std::unique_ptr<Expression> expr);
     virtual std::string toStringWithTabs(const core::GlobalState &gs, int tabs = 0) const;
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0);
     virtual std::string nodeName();
