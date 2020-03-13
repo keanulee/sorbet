@@ -104,6 +104,7 @@ private:
 
     struct ResolutionItem {
         shared_ptr<Nesting> scope;
+        core::FileRef file;
         ast::ConstantLit *out;
         bool resolutionFailed = false;
 
@@ -117,6 +118,7 @@ private:
     struct AncestorResolutionItem {
         ast::ConstantLit *ancestor;
         core::SymbolRef klass;
+        core::FileRef file;
 
         bool isSuperclass; // true if superclass, false for mixin
 
@@ -130,6 +132,7 @@ private:
 
     struct ClassAliasResolutionItem {
         core::SymbolRef lhs;
+        core::FileRef file;
         ast::ConstantLit *rhs;
 
         ClassAliasResolutionItem() = default;
@@ -142,9 +145,9 @@ private:
 
     struct TypeAliasResolutionItem {
         core::SymbolRef lhs;
+        core::FileRef file;
         ast::Expression *rhs;
 
-        TypeAliasResolutionItem(core::SymbolRef lhs, ast::Expression *rhs) : lhs(lhs), rhs(rhs) {}
         TypeAliasResolutionItem(TypeAliasResolutionItem &&) noexcept = default;
         TypeAliasResolutionItem &operator=(TypeAliasResolutionItem &&rhs) noexcept = default;
 
@@ -212,7 +215,7 @@ private:
         if (auto *id = ast::cast_tree<ast::ConstantLit>(resolvedScope)) {
             auto sym = id->symbol;
             if (sym.exists() && sym.data(ctx)->isTypeAlias() && !resolutionFailed) {
-                if (auto e = ctx.state.beginError(c->loc, core::errors::Resolver::ConstantInTypeAlias)) {
+                if (auto e = ctx.beginError(c->loc, core::errors::Resolver::ConstantInTypeAlias)) {
                     e.setHeader("Resolving constants through type aliases is not supported");
                 }
                 resolutionFailed = true;
@@ -226,7 +229,7 @@ private:
             return result;
         } else {
             if (!resolutionFailed) {
-                if (auto e = ctx.state.beginError(c->loc, core::errors::Resolver::DynamicConstant)) {
+                if (auto e = ctx.beginError(c->loc, core::errors::Resolver::DynamicConstant)) {
                     e.setHeader("Dynamic constant references are unsupported");
                 }
             }
@@ -245,7 +248,7 @@ private:
                 auto loc = resolved.data(ctx)->loc();
                 if (auto e = ctx.state.beginError(loc, core::errors::Resolver::RecursiveTypeAlias)) {
                     e.setHeader("Unable to resolve right hand side of type alias `{}`", resolved.data(ctx)->show(ctx));
-                    e.addErrorLine(job.out->original->loc, "Type alias used here");
+                    e.addErrorLine(core::Loc(ctx.file, job.out->original->loc), "Type alias used here");
                 }
                 resolved.data(ctx)->resultType =
                     core::Types::untyped(ctx, resolved); // <<-- This is the reason this takes a MutableContext
@@ -296,7 +299,7 @@ private:
 
         auto customAutogenError = job.out->original->cnst == core::Symbols::Subclasses().data(ctx)->name;
         if (!alreadyReported || customAutogenError) {
-            if (auto e = ctx.state.beginError(job.out->original->loc, core::errors::Resolver::StubConstant)) {
+            if (auto e = ctx.beginError(job.out->original->loc, core::errors::Resolver::StubConstant)) {
                 e.setHeader("Unable to resolve constant `{}`", job.out->original->cnst.show(ctx));
 
                 auto suggestScope = job.out->resolutionScopes.front();
@@ -316,8 +319,8 @@ private:
                             const auto replacement = suggestion.symbol.show(ctx);
                             lines.emplace_back(core::ErrorLine::from(suggestion.symbol.data(ctx)->loc(),
                                                                      "Did you mean: `{}`?", replacement));
-                            e.replaceWith(fmt::format("Replace with `{}`", replacement), job.out->loc, "{}",
-                                          replacement);
+                            e.replaceWith(fmt::format("Replace with `{}`", replacement),
+                                          core::Loc(ctx.file, job.out->loc), "{}", replacement);
                         }
                         e.addErrorSection(core::ErrorSection(lines));
                     }
@@ -359,7 +362,7 @@ private:
             enclosingClass = enclosingClass.data(ctx)->owner.data(ctx)->enclosingClass(ctx);
         }
         if (enclosingTypeMember.exists()) {
-            if (auto e = ctx.state.beginError(job.rhs->loc, core::errors::Resolver::TypeAliasInGenericClass)) {
+            if (auto e = ctx.beginError(job.rhs->loc, core::errors::Resolver::TypeAliasInGenericClass)) {
                 e.setHeader("Type aliases are not allowed in generic classes");
                 e.addErrorLine(enclosingTypeMember.data(ctx)->loc(), "Here is enclosing generic member");
             }
@@ -383,10 +386,11 @@ private:
 
         auto rhsData = rhsSym.data(ctx);
         if (rhsData->isTypeAlias()) {
-            if (auto e = ctx.state.beginError(it.rhs->loc, core::errors::Resolver::ReassignsTypeAlias)) {
+            if (auto e = ctx.beginError(it.rhs->loc, core::errors::Resolver::ReassignsTypeAlias)) {
                 e.setHeader("Reassigning a type alias is not allowed");
                 e.addErrorLine(rhsData->loc(), "Originally defined here");
-                e.replaceWith("Declare as type alias", it.rhs->loc, "T.type_alias {{{}}}", it.rhs->loc.source(ctx));
+                e.replaceWith("Declare as type alias", core::Loc(ctx.file, it.rhs->loc), "T.type_alias {{{}}}",
+                              core::Loc(ctx.file, it.rhs->loc).source(ctx));
             }
             it.lhs.data(ctx)->resultType = core::Types::untypedUntracked();
             return true;
@@ -447,7 +451,7 @@ private:
             if (!lastRun) {
                 return false;
             }
-            if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::DynamicSuperclass)) {
+            if (auto e = ctx.beginError(job.ancestor->loc, core::errors::Resolver::DynamicSuperclass)) {
                 e.setHeader("Superclasses and mixins may not be type aliases");
             }
             resolved = stubSymbolForAncestor(job);
@@ -459,20 +463,20 @@ private:
             if (!lastRun) {
                 return false;
             }
-            if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::DynamicSuperclass)) {
+            if (auto e = ctx.beginError(job.ancestor->loc, core::errors::Resolver::DynamicSuperclass)) {
                 e.setHeader("Superclasses and mixins may only use class aliases like `{}`", "A = Integer");
             }
             resolved = stubSymbolForAncestor(job);
         }
 
         if (resolved == job.klass) {
-            if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::CircularDependency)) {
+            if (auto e = ctx.beginError(job.ancestor->loc, core::errors::Resolver::CircularDependency)) {
                 e.setHeader("Circular dependency: `{}` is a parent of itself", job.klass.data(ctx)->show(ctx));
                 e.addErrorLine(resolved.data(ctx)->loc(), "Class definition");
             }
             resolved = stubSymbolForAncestor(job);
         } else if (resolved.data(ctx)->derivesFrom(ctx, job.klass)) {
-            if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::CircularDependency)) {
+            if (auto e = ctx.beginError(job.ancestor->loc, core::errors::Resolver::CircularDependency)) {
                 e.setHeader("Circular dependency: `{}` and `{}` are declared as parents of each other",
                             job.klass.data(ctx)->show(ctx), resolved.data(ctx)->show(ctx));
                 e.addErrorLine(job.klass.data(ctx)->loc(), "One definition");
@@ -491,7 +495,7 @@ private:
                        job.klass.data(ctx)->superClass() == resolved) {
                 job.klass.data(ctx)->setSuperClass(resolved);
             } else {
-                if (auto e = ctx.state.beginError(job.ancestor->loc, core::errors::Resolver::RedefinitionOfParents)) {
+                if (auto e = ctx.beginError(job.ancestor->loc, core::errors::Resolver::RedefinitionOfParents)) {
                     e.setHeader("Parent of class `{}` redefined from `{}` to `{}`", job.klass.data(ctx)->show(ctx),
                                 job.klass.data(ctx)->superClass().show(ctx), resolved.show(ctx));
                 }
@@ -538,7 +542,7 @@ private:
         if (auto *cnst = ast::cast_tree<ast::ConstantLit>(ancestor.get())) {
             auto sym = cnst->symbol;
             if (sym.exists() && sym.data(ctx)->isTypeAlias()) {
-                if (auto e = ctx.state.beginError(cnst->loc, core::errors::Resolver::DynamicSuperclass)) {
+                if (auto e = ctx.beginError(cnst->loc, core::errors::Resolver::DynamicSuperclass)) {
                     e.setHeader("Superclasses and mixins may not be type aliases");
                 }
                 return;
@@ -582,7 +586,7 @@ public:
         }
         auto loc = c->loc;
         auto out = make_unique<ast::ConstantLit>(loc, core::Symbols::noSymbol(), std::move(c));
-        ResolutionItem job{nesting_, out.get()};
+        ResolutionItem job{nesting_, ctx.file, out.get()};
         if (resolveJob(ctx, job)) {
             categoryCounterInc("resolve.constants.nonancestor", "firstpass");
         } else {
@@ -628,17 +632,17 @@ public:
 
                 // because we're synthesizing a fake "untyped" here and actually adding it to the AST, we won't report
                 // an arity mismatch for `T.untyped` in the future, so report the arity mismatch now
-                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeAlias)) {
+                if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidTypeAlias)) {
                     e.setHeader("No block given to `{}`", "T.type_alias");
                     CorrectTypeAlias::eagerToLazy(ctx, e, send);
                 }
             }
-            auto typeAliasItem = TypeAliasResolutionItem{id->symbol, send->block->body.get()};
+            auto typeAliasItem = TypeAliasResolutionItem{id->symbol, ctx.file, send->block->body.get()};
             this->todoTypeAliases_.emplace_back(std::move(typeAliasItem));
 
             // We also enter a ResolutionItem for the lhs of a type alias so even if the type alias isn't used,
             // we'll still emit a warning when the rhs of a type alias doesn't resolve.
-            auto item = ResolutionItem{nesting_, id};
+            auto item = ResolutionItem{nesting_, ctx.file, id};
             this->todo_.emplace_back(std::move(item));
             return asgn;
         }
@@ -648,7 +652,7 @@ public:
             return asgn;
         }
 
-        auto item = ClassAliasResolutionItem{id->symbol, rhs};
+        auto item = ClassAliasResolutionItem{id->symbol, ctx.file, rhs};
 
         // TODO(perf) currently, by construction the last item in resolve todo list is the one this alias depends on
         // We may be able to get some perf by using this
@@ -769,17 +773,21 @@ public:
             }
         }
 
-        fast_sort(todo,
-                  [](const auto &lhs, const auto &rhs) -> bool { return locCompare(lhs.out->loc, rhs.out->loc); });
-        fast_sort(todoAncestors, [](const auto &lhs, const auto &rhs) -> bool {
-            return locCompare(lhs.ancestor->loc, rhs.ancestor->loc);
+        fast_sort(todo, [](const auto &lhs, const auto &rhs) -> bool {
+            return locCompare(core::Loc(lhs.file, lhs.out->loc), core::Loc(rhs.file, rhs.out->loc));
         });
-        fast_sort(todoClassAliases,
-                  [](const auto &lhs, const auto &rhs) -> bool { return locCompare(lhs.rhs->loc, rhs.rhs->loc); });
-        fast_sort(todoTypeAliases,
-                  [](const auto &lhs, const auto &rhs) -> bool { return locCompare(lhs.rhs->loc, rhs.rhs->loc); });
-        fast_sort(trees,
-                  [](const auto &lhs, const auto &rhs) -> bool { return locCompare(lhs.tree->loc, rhs.tree->loc); });
+        fast_sort(todoAncestors, [](const auto &lhs, const auto &rhs) -> bool {
+            return locCompare(core::Loc(lhs.file, lhs.ancestor->loc), core::Loc(rhs.file, rhs.ancestor->loc));
+        });
+        fast_sort(todoClassAliases, [](const auto &lhs, const auto &rhs) -> bool {
+            return locCompare(core::Loc(lhs.file, lhs.rhs->loc), core::Loc(rhs.file, rhs.rhs->loc));
+        });
+        fast_sort(todoTypeAliases, [](const auto &lhs, const auto &rhs) -> bool {
+            return locCompare(core::Loc(lhs.file, lhs.rhs->loc), core::Loc(rhs.file, rhs.rhs->loc));
+        });
+        fast_sort(trees, [](const auto &lhs, const auto &rhs) -> bool {
+            return locCompare(core::Loc(lhs.file, lhs.tree->loc), core::Loc(rhs.file, rhs.tree->loc));
+        });
 
         Timer timeit1(ctx.state.tracer(), "resolver.resolve_constants.fixed_point");
 
@@ -797,7 +805,7 @@ public:
                 int origSize = todoAncestors.size();
                 auto it =
                     remove_if(todoAncestors.begin(), todoAncestors.end(), [ctx](AncestorResolutionItem &job) -> bool {
-                        auto resolved = resolveAncestorJob(ctx, job, false);
+                        auto resolved = resolveAncestorJob(ctx.withFile(job.file), job, false);
                         if (resolved) {
                             tryRegisterSealedSubclass(ctx, job);
                         }
@@ -810,8 +818,9 @@ public:
             {
                 Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.constants");
                 int origSize = todo.size();
-                auto it = remove_if(todo.begin(), todo.end(),
-                                    [ctx](ResolutionItem &job) -> bool { return resolveJob(ctx, job); });
+                auto it = remove_if(todo.begin(), todo.end(), [ctx](ResolutionItem &job) -> bool {
+                    return resolveJob(ctx.withFile(job.file), job);
+                });
                 todo.erase(it, todo.end());
                 progress = progress || (origSize != todo.size());
                 categoryCounterAdd("resolve.constants.nonancestor", "retry", origSize - todo.size());
@@ -824,9 +833,10 @@ public:
                 // there would be no point in running the todoClassAliases step before todo
 
                 int origSize = todoClassAliases.size();
-                auto it =
-                    remove_if(todoClassAliases.begin(), todoClassAliases.end(),
-                              [ctx](ClassAliasResolutionItem &it) -> bool { return resolveClassAliasJob(ctx, it); });
+                auto it = remove_if(todoClassAliases.begin(), todoClassAliases.end(),
+                                    [ctx](ClassAliasResolutionItem &it) -> bool {
+                                        return resolveClassAliasJob(ctx.withFile(it.file), it);
+                                    });
                 todoClassAliases.erase(it, todoClassAliases.end());
                 progress = progress || (origSize != todoClassAliases.size());
                 categoryCounterAdd("resolve.constants.aliases", "retry", origSize - todoClassAliases.size());
@@ -834,9 +844,10 @@ public:
             {
                 Timer timeit(ctx.state.tracer(), "resolver.resolve_constants.fixed_point.type_aliases");
                 int origSize = todoTypeAliases.size();
-                auto it =
-                    remove_if(todoTypeAliases.begin(), todoTypeAliases.end(),
-                              [ctx](TypeAliasResolutionItem &it) -> bool { return resolveTypeAliasJob(ctx, it); });
+                auto it = remove_if(todoTypeAliases.begin(), todoTypeAliases.end(),
+                                    [ctx](TypeAliasResolutionItem &it) -> bool {
+                                        return resolveTypeAliasJob(ctx.withFile(it.file), it);
+                                    });
                 todoTypeAliases.erase(it, todoTypeAliases.end());
                 progress = progress || (origSize != todoTypeAliases.size());
                 categoryCounterAdd("resolve.constants.typealiases", "retry", origSize - todoTypeAliases.size());
@@ -862,17 +873,17 @@ public:
          * - Within a file, report the first occurrence.
          */
         fast_sort(todo, [ctx](const auto &lhs, const auto &rhs) -> bool {
-            if (lhs.out->loc == rhs.out->loc) {
+            if (core::Loc(lhs.file, lhs.out->loc) == core::Loc(rhs.file, rhs.out->loc)) {
                 return constantDepth(lhs.out) < constantDepth(rhs.out);
             }
-            return compareLocs(ctx, lhs.out->loc, rhs.out->loc);
+            return compareLocs(ctx, core::Loc(lhs.file, lhs.out->loc), core::Loc(rhs.file, rhs.out->loc));
         });
 
         fast_sort(todoAncestors, [ctx](const auto &lhs, const auto &rhs) -> bool {
-            if (lhs.ancestor->loc == rhs.ancestor->loc) {
+            if (core::Loc(lhs.file, lhs.ancestor->loc) == core::Loc(rhs.file, rhs.ancestor->loc)) {
                 return constantDepth(lhs.ancestor) < constantDepth(rhs.ancestor);
             }
-            return compareLocs(ctx, lhs.ancestor->loc, rhs.ancestor->loc);
+            return compareLocs(ctx, core::Loc(lhs.file, lhs.ancestor->loc), core::Loc(rhs.file, rhs.ancestor->loc));
         });
 
         // Note that this is missing alias stubbing, thus resolveJob needs to be able to handle missing aliases.
@@ -884,13 +895,13 @@ public:
                 i++;
                 // Only give suggestions for the first 10, because fuzzy suggestions are expensive.
                 auto suggestDidYouMean = i < 10;
-                constantResolutionFailed(ctx, job, suggestDidYouMean);
+                constantResolutionFailed(ctx.withFile(job.file), job, suggestDidYouMean);
             }
 
             for (auto &job : todoAncestors) {
-                auto resolved = resolveAncestorJob(ctx, job, true);
+                auto resolved = resolveAncestorJob(ctx.withFile(job.file), job, true);
                 if (!resolved) {
-                    resolved = resolveAncestorJob(ctx, job, true);
+                    resolved = resolveAncestorJob(ctx.withFile(job.file), job, true);
                     ENFORCE(resolved);
                 }
             }
@@ -974,7 +985,7 @@ class ResolveTypeMembersWalk {
             if (parentMember.data(ctx)->isTypeMember()) {
                 parentType = core::cast_type<core::LambdaParam>(parentMember.data(ctx)->resultType.get());
                 ENFORCE(parentType != nullptr);
-            } else if (auto e = ctx.state.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
+            } else if (auto e = ctx.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
                 const auto parentShow = parentMember.data(ctx)->show(ctx);
                 e.setHeader("`{}` is a type member but `{}` is not a type member", data->show(ctx), parentShow);
                 e.addErrorLine(parentMember.data(ctx)->loc(), "`{}` definition", parentShow);
@@ -1033,13 +1044,13 @@ class ResolveTypeMembersWalk {
         // `fixed`.
         if (parentType != nullptr) {
             if (!core::Types::isSubType(ctx, parentType->lowerBound, memberType->lowerBound)) {
-                if (auto e = ctx.state.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
+                if (auto e = ctx.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
                     e.setHeader("parent lower bound `{}` is not a subtype of lower bound `{}`",
                                 parentType->lowerBound->show(ctx), memberType->lowerBound->show(ctx));
                 }
             }
             if (!core::Types::isSubType(ctx, memberType->upperBound, parentType->upperBound)) {
-                if (auto e = ctx.state.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
+                if (auto e = ctx.beginError(rhs->loc, core::errors::Resolver::ParentTypeBoundsMismatch)) {
                     e.setHeader("upper bound `{}` is not a subtype of parent upper bound `{}`",
                                 memberType->upperBound->show(ctx), parentType->upperBound->show(ctx));
                 }
@@ -1050,7 +1061,7 @@ class ResolveTypeMembersWalk {
         // bound. This will be a no-op in the case that the type member
         // is fixed.
         if (!core::Types::isSubType(ctx, memberType->lowerBound, memberType->upperBound)) {
-            if (auto e = ctx.state.beginError(rhs->loc, core::errors::Resolver::InvalidTypeMemberBounds)) {
+            if (auto e = ctx.beginError(rhs->loc, core::errors::Resolver::InvalidTypeMemberBounds)) {
                 e.setHeader("`{}` is not a subtype of `{}`", memberType->lowerBound->show(ctx),
                             memberType->upperBound->show(ctx));
             }
@@ -1337,18 +1348,18 @@ private:
         }
     }
 
-    void fillInInfoFromSig(core::MutableContext ctx, core::SymbolRef method, core::Loc exprLoc, ParsedSig sig,
+    void fillInInfoFromSig(core::MutableContext ctx, core::SymbolRef method, core::LocOffsets exprLoc, ParsedSig sig,
                            bool isOverloaded, const ast::MethodDef &mdef) {
         ENFORCE(isOverloaded || mdef.symbol == method);
         ENFORCE(isOverloaded || method.data(ctx)->arguments().size() == mdef.args.size());
 
         if (!sig.seen.returns && !sig.seen.void_) {
-            if (auto e = ctx.state.beginError(exprLoc, core::errors::Resolver::InvalidMethodSignature)) {
+            if (auto e = ctx.beginError(exprLoc, core::errors::Resolver::InvalidMethodSignature)) {
                 e.setHeader("Malformed `{}`: No return type specified. Specify one with .returns()", "sig");
             }
         }
         if (sig.seen.returns && sig.seen.void_) {
-            if (auto e = ctx.state.beginError(exprLoc, core::errors::Resolver::InvalidMethodSignature)) {
+            if (auto e = ctx.beginError(exprLoc, core::errors::Resolver::InvalidMethodSignature)) {
                 e.setHeader("Malformed `{}`: Don't use both .returns() and .void", "sig");
             }
         }
@@ -1412,7 +1423,7 @@ private:
                 if (auto e = ctx.state.beginError(arg.loc, core::errors::Resolver::BadParameterOrdering)) {
                     e.setHeader("Malformed `{}`. Required parameter `{}` must be declared before all the optional ones",
                                 "sig", treeArgName.show(ctx));
-                    e.addErrorLine(exprLoc, "Signature");
+                    e.addErrorLine(core::Loc(ctx.file, exprLoc), "Signature");
                 }
             }
 
@@ -1438,7 +1449,7 @@ private:
                     if (auto e = ctx.state.beginError(arg.loc, core::errors::Resolver::InvalidMethodSignature)) {
                         e.setHeader("Malformed `{}`. Type not specified for argument `{}`", "sig",
                                     treeArgName.show(ctx));
-                        e.addErrorLine(exprLoc, "Signature");
+                        e.addErrorLine(core::Loc(ctx.file, exprLoc), "Signature");
                     }
                 }
             }
@@ -1465,7 +1476,7 @@ private:
                 auto sname = spec.name.show(ctx);
                 auto dname = param->localVariable._name.show(ctx);
                 if (sname != dname) {
-                    if (auto e = ctx.state.beginError(param->loc, core::errors::Resolver::BadParameterOrdering)) {
+                    if (auto e = ctx.beginError(param->loc, core::errors::Resolver::BadParameterOrdering)) {
                         e.setHeader("Bad parameter ordering for `{}`, expected `{}` instead", dname, sname);
                         e.addErrorLine(spec.loc, "Expected index in signature:");
                     }
@@ -1490,7 +1501,7 @@ private:
                     TypeSyntaxArgs{allowSelfType, allowRebind, allowTypeMember, core::Symbols::untyped()});
             }
 
-            if (auto e = ctx.state.beginError(lastSigs[0]->loc, core::errors::Resolver::InvalidMethodSignature)) {
+            if (auto e = ctx.beginError(lastSigs[0]->loc, core::errors::Resolver::InvalidMethodSignature)) {
                 e.setHeader("Malformed `{}`. No method def following it", "sig");
             }
 
@@ -1539,11 +1550,11 @@ private:
             [&](ast::Send *send) {
                 if (TypeSyntax::isSig(ctx, send)) {
                     if (!lastSigs.empty()) {
-                        if (!ctx.permitOverloadDefinitions(send->loc.file())) {
-                            if (auto e = ctx.state.beginError(lastSigs[0]->loc,
-                                                              core::errors::Resolver::OverloadNotAllowed)) {
+                        if (!ctx.permitOverloadDefinitions(ctx.file)) {
+                            if (auto e = ctx.beginError(lastSigs[0]->loc, core::errors::Resolver::OverloadNotAllowed)) {
                                 e.setHeader("Unused type annotation. No method def before next annotation");
-                                e.addErrorLine(send->loc, "Type annotation that will be used instead");
+                                e.addErrorLine(core::Loc(ctx.file, send->loc),
+                                               "Type annotation that will be used instead");
                             }
                         }
                     }
@@ -1564,7 +1575,7 @@ private:
                 if (debug_mode) {
                     bool hasSig = !lastSigs.empty();
                     bool rewriten = mdef->flags.isRewriterSynthesized;
-                    bool isRBI = mdef->loc.file().data(ctx).isRBI();
+                    bool isRBI = mdef->declLoc.file().data(ctx).isRBI();
                     if (hasSig) {
                         categoryCounterInc("method.sig", "true");
                     } else {
@@ -1589,16 +1600,16 @@ private:
                     prodCounterInc("types.sig.count");
 
                     auto loc = lastSigs[0]->loc;
-                    if (loc.file().data(ctx).originalSigil == core::StrictLevel::None &&
+                    if (ctx.file.data(ctx).originalSigil == core::StrictLevel::None &&
                         !lastSigs.front()->flags.isRewriterSynthesized) {
-                        if (auto e = ctx.state.beginError(loc, core::errors::Resolver::SigInFileWithoutSigil)) {
+                        if (auto e = ctx.beginError(loc, core::errors::Resolver::SigInFileWithoutSigil)) {
                             e.setHeader("To use `{}`, this file must declare an explicit `{}` sigil (found: "
                                         "none). If you're not sure which one to use, start with `{}`",
                                         "sig", "# typed:", "# typed: false");
                         }
                     }
 
-                    bool isOverloaded = lastSigs.size() > 1 && ctx.permitOverloadDefinitions(loc.file());
+                    bool isOverloaded = lastSigs.size() > 1 && ctx.permitOverloadDefinitions(ctx.file);
                     auto originalName = mdef->symbol.data(ctx)->name;
                     if (isOverloaded) {
                         ctx.state.mangleRenameSymbol(mdef->symbol, originalName);
@@ -1637,8 +1648,8 @@ private:
                                     argsToKeep.emplace_back(argId);
                                 }
                             }
-                            overloadSym = ctx.state.enterNewMethodOverload(lastSigs[i]->loc, mdef->symbol, originalName,
-                                                                           i, argsToKeep);
+                            overloadSym = ctx.state.enterNewMethodOverload(core::Loc(ctx.file, lastSigs[i]->loc),
+                                                                           mdef->symbol, originalName, i, argsToKeep);
                             if (i != lastSigs.size() - 1) {
                                 overloadSym.data(ctx)->setOverloaded();
                             }
@@ -1655,23 +1666,21 @@ private:
 
                 if (mdef->symbol.data(ctx)->isAbstract()) {
                     if (!ast::isa_tree<ast::EmptyTree>(mdef->rhs.get())) {
-                        if (auto e =
-                                ctx.state.beginError(mdef->rhs->loc, core::errors::Resolver::AbstractMethodWithBody)) {
+                        if (auto e = ctx.beginError(mdef->rhs->loc, core::errors::Resolver::AbstractMethodWithBody)) {
                             e.setHeader("Abstract methods must not contain any code in their body");
-                            e.replaceWith("Delete the body", mdef->rhs->loc, "");
+                            e.replaceWith("Delete the body", core::Loc(ctx.file, mdef->rhs->loc), "");
                         }
 
                         mdef->rhs = ast::MK::EmptyTree();
                     }
                     if (!mdef->symbol.data(ctx)->enclosingClass(ctx).data(ctx)->isClassOrModuleAbstract()) {
-                        if (auto e = ctx.state.beginError(mdef->loc,
-                                                          core::errors::Resolver::AbstractMethodOutsideAbstract)) {
+                        if (auto e = ctx.beginError(mdef->loc, core::errors::Resolver::AbstractMethodOutsideAbstract)) {
                             e.setHeader("Before declaring an abstract method, you must mark your class/module "
                                         "as abstract using `abstract!` or `interface!`");
                         }
                     }
                 } else if (mdef->symbol.data(ctx)->enclosingClass(ctx).data(ctx)->isClassOrModuleInterface()) {
-                    if (auto e = ctx.state.beginError(mdef->loc, core::errors::Resolver::ConcreteMethodInInterface)) {
+                    if (auto e = ctx.beginError(mdef->loc, core::errors::Resolver::ConcreteMethodInInterface)) {
                         e.setHeader("All methods in an interface must be declared abstract");
                     }
                 }
@@ -1696,7 +1705,7 @@ private:
             expr.get(), [&](ast::Literal *a) { result = a->value; },
             [&](ast::Cast *cast) {
                 if (cast->cast != core::Names::let()) {
-                    if (auto e = ctx.state.beginError(cast->loc, core::errors::Resolver::ConstantAssertType)) {
+                    if (auto e = ctx.beginError(cast->loc, core::errors::Resolver::ConstantAssertType)) {
                         e.setHeader("Use `{}` to specify the type of constants", "T.let");
                     }
                 }
@@ -1725,7 +1734,7 @@ private:
         if (cast == nullptr) {
             return false;
         } else if (cast->cast != core::Names::let()) {
-            if (auto e = ctx.state.beginError(cast->loc, core::errors::Resolver::ConstantAssertType)) {
+            if (auto e = ctx.beginError(cast->loc, core::errors::Resolver::ConstantAssertType)) {
                 e.setHeader("Use `{}` to specify the type of constants", "T.let");
             }
         }
@@ -1733,7 +1742,7 @@ private:
         core::SymbolRef scope;
         if (uid->kind == ast::UnresolvedIdent::Kind::Class) {
             if (!ctx.owner.data(ctx)->isClassOrModule()) {
-                if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
+                if (auto e = ctx.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
                     e.setHeader("The class variable `{}` must be declared at class scope", uid->name.show(ctx));
                 }
             }
@@ -1749,14 +1758,14 @@ private:
             } else if (ctx.owner.data(ctx)->isMethod() && ctx.owner.data(ctx)->owner.data(ctx)->isSingletonClass(ctx) &&
                        !core::Types::isSubType(ctx, core::Types::nilClass(), cast->type)) {
                 // Declaring a class instance variable in a static method
-                if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
+                if (auto e = ctx.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
                     e.setHeader("The singleton instance variable `{}` must be declared inside the class body or "
                                 "declared nilable",
                                 uid->name.show(ctx));
                 }
             } else if (!core::Types::isSubType(ctx, core::Types::nilClass(), cast->type)) {
                 // Inside a method; declaring a normal instance variable
-                if (auto e = ctx.state.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
+                if (auto e = ctx.beginError(uid->loc, core::errors::Resolver::InvalidDeclareVariables)) {
                     e.setHeader("The instance variable `{}` must be declared inside `{}` or declared nilable",
                                 uid->name.show(ctx), "initialize");
                 }
@@ -1776,12 +1785,13 @@ private:
                 auto priorLoc = prior.data(ctx)->loc();
                 core::Loc reportOn;
                 core::Loc errorLine;
-                if (uid->loc.file() == priorLoc.file()) {
-                    reportOn = uid->loc.beginPos() < priorLoc.beginPos() ? uid->loc : priorLoc;
-                    errorLine = uid->loc.beginPos() < priorLoc.beginPos() ? priorLoc : uid->loc;
+                core::Loc thisLoc = core::Loc(ctx.file, uid->loc);
+                if (thisLoc.file() == priorLoc.file()) {
+                    reportOn = thisLoc.beginPos() < priorLoc.beginPos() ? thisLoc : priorLoc;
+                    errorLine = thisLoc.beginPos() < priorLoc.beginPos() ? priorLoc : thisLoc;
                 } else {
-                    reportOn = uid->loc.file() < priorLoc.file() ? uid->loc : priorLoc;
-                    errorLine = uid->loc.file() < priorLoc.file() ? priorLoc : uid->loc;
+                    reportOn = thisLoc.file() < priorLoc.file() ? thisLoc : priorLoc;
+                    errorLine = thisLoc.file() < priorLoc.file() ? priorLoc : thisLoc;
                 }
 
                 if (auto e = ctx.state.beginError(reportOn, core::errors::Resolver::DuplicateVariableDeclaration)) {
@@ -1794,9 +1804,9 @@ private:
         core::SymbolRef var;
 
         if (uid->kind == ast::UnresolvedIdent::Kind::Class) {
-            var = ctx.state.enterStaticFieldSymbol(uid->loc, scope, uid->name);
+            var = ctx.state.enterStaticFieldSymbol(core::Loc(ctx.file, uid->loc), scope, uid->name);
         } else {
-            var = ctx.state.enterFieldSymbol(uid->loc, scope, uid->name);
+            var = ctx.state.enterFieldSymbol(core::Loc(ctx.file, uid->loc), scope, uid->name);
         }
 
         var.data(ctx)->resultType = cast->type;
@@ -1850,8 +1860,8 @@ public:
                 // or type aliases. The check for isa_type<AliasType> makes sure that we skip aliases of the form `X
                 // = Integer` and only run this over constant value assignments like `X = 5` or `Y = 5; X = Y`.
                 if (resolveConstantType(ctx, asgn->rhs, sym) == nullptr) {
-                    if (auto e = ctx.state.beginError(asgn->rhs->loc,
-                                                      core::errors::Resolver::ConstantMissingTypeAnnotation)) {
+                    if (auto e =
+                            ctx.beginError(asgn->rhs->loc, core::errors::Resolver::ConstantMissingTypeAnnotation)) {
                         e.setHeader("Constants must have type annotations with `{}` when specifying `{}`", "T.let",
                                     "# typed: strict");
                     }
@@ -1932,8 +1942,8 @@ public:
                     // of errors from lower levels" claim. This is ONLY an error in lower levels.
                     auto doWhat = send->fun == core::Names::revealType() ? "reveal types" : "check exhaustiveness";
                     auto fun = fmt::format("T.{}", send->fun.data(ctx)->show(ctx));
-                    if (send->loc.file().data(ctx).strictLevel <= core::StrictLevel::False) {
-                        if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::RevealTypeInUntypedFile)) {
+                    if (ctx.file.data(ctx).strictLevel <= core::StrictLevel::False) {
+                        if (auto e = ctx.beginError(send->loc, core::errors::Resolver::RevealTypeInUntypedFile)) {
                             e.setHeader("`{}` can only {} in `{}` files (or higher)", fun, doWhat, "# typed: true");
                         }
                     }
@@ -1974,7 +1984,7 @@ public:
             }
 
             if (!toMethod.exists()) {
-                if (auto e = ctx.state.beginError(send->args[1]->loc, core::errors::Resolver::BadAliasMethod)) {
+                if (auto e = ctx.beginError(send->args[1]->loc, core::errors::Resolver::BadAliasMethod)) {
                     e.setHeader("Can't make method alias from `{}` to non existing method `{}`", fromName.show(ctx),
                                 toName.show(ctx));
                 }
@@ -1983,7 +1993,7 @@ public:
 
             core::SymbolRef fromMethod = owner.data(ctx)->findMemberNoDealias(ctx, fromName);
             if (fromMethod.exists() && fromMethod.data(ctx)->dealiasMethod(ctx) != toMethod) {
-                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::BadAliasMethod)) {
+                if (auto e = ctx.beginError(send->loc, core::errors::Resolver::BadAliasMethod)) {
                     auto dealiased = fromMethod.data(ctx)->dealiasMethod(ctx);
                     if (fromMethod == dealiased) {
                         e.setHeader("Redefining the existing method `{}` as a method alias",
@@ -2005,7 +2015,7 @@ public:
                 return send;
             }
 
-            core::SymbolRef alias = ctx.state.enterMethodSymbol(send->loc, owner, fromName);
+            core::SymbolRef alias = ctx.state.enterMethodSymbol(core::Loc(ctx.file, send->loc), owner, fromName);
             alias.data(ctx)->resultType = core::make_type<core::AliasType>(toMethod);
 
             return send;
@@ -2018,14 +2028,14 @@ public:
 class ResolveMixesInClassMethodsWalk {
     void processMixesInClassMethods(core::MutableContext ctx, ast::Send *send) {
         if (!ctx.owner.data(ctx)->isClassOrModule() || !ctx.owner.data(ctx)->isClassOrModuleModule()) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("`{}` can only be declared inside a module, not a class", send->fun.data(ctx)->show(ctx));
             }
             // Keep processing it anyways
         }
 
         if (send->args.size() != 1) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("Wrong number of arguments to `{}`: Expected: `{}`, got: `{}`",
                             send->fun.data(ctx)->show(ctx), 1, send->args.size());
             }
@@ -2034,28 +2044,28 @@ class ResolveMixesInClassMethodsWalk {
         auto *front = send->args.front().get();
         auto *id = ast::cast_tree<ast::ConstantLit>(front);
         if (id == nullptr || !id->symbol.exists() || !id->symbol.data(ctx)->isClassOrModule()) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("Argument to `{}` must be statically resolvable to a module",
                             send->fun.data(ctx)->show(ctx));
             }
             return;
         }
         if (id->symbol.data(ctx)->isClassOrModuleClass()) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("`{}` is a class, not a module; Only modules may be mixins",
                             id->symbol.data(ctx)->show(ctx));
             }
             return;
         }
         if (id->symbol == ctx.owner) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("Must not pass your self to `{}`", send->fun.data(ctx)->show(ctx));
             }
             return;
         }
         auto existing = ctx.owner.data(ctx)->findMember(ctx, core::Names::classMethods());
         if (existing.exists() && existing != id->symbol) {
-            if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
+            if (auto e = ctx.beginError(send->loc, core::errors::Resolver::InvalidMixinDeclaration)) {
                 e.setHeader("Redeclaring `{}` from module `{}` to module `{}`", send->fun.data(ctx)->show(ctx),
                             existing.data(ctx)->show(ctx), id->symbol.data(ctx)->show(ctx));
             }
@@ -2080,7 +2090,7 @@ public:
         ENFORCE(original->symbol != core::Symbols::todo(), "These should have all been resolved: {}",
                 original->toString(ctx));
         if (original->symbol == core::Symbols::root()) {
-            ENFORCE(ctx.state.lookupStaticInitForFile(original->loc).exists());
+            ENFORCE(ctx.state.lookupStaticInitForFile(core::Loc(ctx.file, original->loc)).exists());
         } else {
             ENFORCE(ctx.state.lookupStaticInitForClass(original->symbol).exists());
         }
