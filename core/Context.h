@@ -2,14 +2,17 @@
 #define SORBET_CONTEXT_H
 
 #include "common/common.h"
-#include "core/NameRef.h"
+#include "core/Error.h"
 #include "core/Files.h"
+#include "core/Loc.h"
+#include "core/NameRef.h"
 #include "core/SymbolRef.h"
 
 namespace sorbet::core {
 class GlobalState;
 class FileRef;
 class MutableContext;
+class ErrorBuilder;
 
 class Context {
 public:
@@ -21,7 +24,8 @@ public:
         return state;
     }
 
-    Context(const GlobalState &state, SymbolRef owner, FileRef file) noexcept : state(state), owner(owner), file(file) {}
+    Context(const GlobalState &state, SymbolRef owner, FileRef file) noexcept
+        : state(state), owner(owner), file(file) {}
     Context(const Context &other) noexcept : state(other.state), owner(other.owner), file(other.file) {}
     Context(const MutableContext &other) noexcept;
 
@@ -49,7 +53,8 @@ public:
     }
 
     // 👋 Stepped here in the debugger? Type 'finish' to step back out.
-    MutableContext(GlobalState &state, SymbolRef owner, FileRef file) noexcept : state(state), owner(owner), file(file) {}
+    MutableContext(GlobalState &state, SymbolRef owner, FileRef file) noexcept
+        : state(state), owner(owner), file(file) {}
     MutableContext(const MutableContext &other) noexcept : state(other.state), owner(other.owner) {}
 
     // Returns a SymbolRef corresponding to the class `self.class` for code

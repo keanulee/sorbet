@@ -23,6 +23,14 @@ struct LocOffsets {
     bool exists() const {
         return endLoc != INVALID_POS_LOC && beginLoc != INVALID_POS_LOC;
     }
+    static LocOffsets none() {
+        return LocOffsets{INVALID_POS_LOC, INVALID_POS_LOC};
+    }
+    LocOffsets join(LocOffsets other) const;
+    LocOffsets copyWithZeroLength() const {
+        return LocOffsets{beginPos(), beginPos()};
+    }
+
 } __attribute__((packed, aligned(1)));
 CheckSize(LocOffsets, 6, 1);
 
@@ -40,7 +48,7 @@ class Loc final {
 
 public:
     static Loc none(FileRef file = FileRef()) {
-        return Loc{file, INVALID_POS_LOC, INVALID_POS_LOC};
+        return Loc{file, LocOffsets::none()};
     }
 
     bool exists() const {
@@ -55,6 +63,9 @@ public:
 
     u4 endPos() const {
         return storage.offsets.endLoc;
+    }
+    const LocOffsets &offsets() const {
+        return storage.offsets;
     }
 
     FileRef file() const {
@@ -76,7 +87,9 @@ public:
         ENFORCE(begin <= end);
     }
 
-    Loc() : Loc(0, INVALID_POS_LOC, INVALID_POS_LOC){};
+    inline Loc(FileRef file, LocOffsets offsets) : Loc(file, offsets.beginPos(), offsets.endPos()){};
+
+    Loc() : Loc(0, LocOffsets::none()){};
 
     Loc &operator=(const Loc &rhs) = default;
     Loc &operator=(Loc &&rhs) = default;
