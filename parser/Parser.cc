@@ -62,7 +62,7 @@ unique_ptr<Node> Parser::run(sorbet::core::GlobalState &gs, core::FileRef file,
     ErrorToError::run(gs, file, driver.diagnostics);
 
     if (!ast) {
-        core::Loc loc(file, 0, 0);
+        core::LocOffsets loc{0, 0};
         NodeVec empty;
         return make_unique<Begin>(loc, std::move(empty));
     }
